@@ -1,0 +1,16 @@
+*~
+3rdp/
+a.out
+Session.vim
+*.exp
+*.ilk
+*.lib
+*.obj
+*.pdb
+.vs
+*.png
+!fonts/*.png
+main
+build/
+dependencies.make
+*.exe
