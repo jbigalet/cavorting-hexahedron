@@ -16,6 +16,23 @@ typedef double f64;
 typedef char* cstring;
 typedef const char *ccstring;
 
+static void debug_printf(ccstring format, ...) {
+    va_list args;
+    va_start(args, format);
+    u32 n = vsnprintf(NULL, 0, format, args);
+    va_end(args);
+
+    cstring str = (cstring)malloc(n+1);
+    va_start(args, format);
+    vsnprintf(str, n+1, format, args);
+    str[n] = '\0';
+    va_end(args);
+
+    OutputDebugStringA(str);
+}
+
+#define printf debug_printf
+
 #define array_size(a) (sizeof(a)/sizeof(a[0]))
 
 #define DEG_TO_RAD ((f32)(M_PI/180))

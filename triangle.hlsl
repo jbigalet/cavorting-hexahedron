@@ -11,5 +11,6 @@ VOut VS(float4 position : POSITION, float4 color : COLOR) {
 }
 
 float4 PS(float4 position : SV_POSITION, float4 color : COLOR) : SV_TARGET {
+    /* return vec4(1,0,0,1); */
     return color;
 }

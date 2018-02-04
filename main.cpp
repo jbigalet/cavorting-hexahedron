@@ -47,9 +47,12 @@ LRESULT CALLBACK WindowProc(HWND hWnd, u32 message, WPARAM wParam, LPARAM lParam
 
 
 i32 main(i32 argc, i8** argv) {
-    AttachConsole(ATTACH_PARENT_PROCESS);
-    freopen( "CON", "w", stdout );
-    freopen( "CON", "w", stderr );
+    /* AttachConsole(ATTACH_PARENT_PROCESS); */
+/*     /1* AllocConsole(); *1/ */
+    /* freopen("CONOUT$", "w", stdout); */
+    /* freopen("CONOUT$", "w", stderr); */
+
+    printf("hi!\n");
 
 
     // init dx11
@@ -87,7 +90,7 @@ i32 main(i32 argc, i8** argv) {
 
 
 
-    // init swap chain
+    // init swap chain & debug layer
 
     DXGI_SWAP_CHAIN_DESC scd;
     ID3D11Device* device = 0;
@@ -105,18 +108,51 @@ i32 main(i32 argc, i8** argv) {
     scd.SampleDesc.Count = 4;                               // how many multisamples
     scd.Windowed = true;                                    // windowed/full-screen mode
 
-    D3D11CreateDeviceAndSwapChain(NULL,
-                                  D3D_DRIVER_TYPE_HARDWARE,
-                                  NULL,
-                                  NULL,
-                                  NULL,
-                                  NULL,
-                                  D3D11_SDK_VERSION,
-                                  &scd,
-                                  &swapchain,
-                                  &device,
-                                  NULL,
-                                  &ctx);
+    u32 creation_flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_DEBUG;
+
+    HRESULT res = D3D11CreateDeviceAndSwapChain(NULL,
+                                                D3D_DRIVER_TYPE_HARDWARE,
+                                                NULL,
+                                                creation_flags,
+                                                NULL,
+                                                NULL,
+                                                D3D11_SDK_VERSION,
+                                                &scd,
+                                                &swapchain,
+                                                &device,
+                                                NULL,
+                                                &ctx);
+    check(!FAILED(res));
+
+    ID3D11Debug* d3d_debug = NULL;
+    bool debug_enabled = false;
+    if(!FAILED(device->QueryInterface(__uuidof(ID3D11Debug), (void**)&d3d_debug))) {
+        ID3D11InfoQueue* info_queue = NULL;
+        if(!FAILED(d3d_debug->QueryInterface(__uuidof(ID3D11InfoQueue), (void**)&info_queue))) {
+            debug_enabled = true;
+
+            info_queue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_CORRUPTION, true);
+            info_queue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_ERROR, true);
+            info_queue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_WARNING, true);
+            info_queue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_INFO, true);
+            info_queue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_MESSAGE, true);
+
+#if 0
+            D3D11_MESSAGE_ID hide[] = {
+                D3D11_MESSAGE_ID_SETPRIVATEDATA_CHANGINGPARAMS,
+            };
+
+            D3D11_INFO_QUEUE_FILTER filter;
+            memset(&filter, 0, sizeof(filter));
+            filter.DenyList.NumIDs = _countof(hide);
+            filter.DenyList.pIDList = hide;
+            info_queue->AddStorageFilterEntries(&filter);
+#endif
+            info_queue->Release();
+        }
+        d3d_debug->Release();
+    }
+    check(debug_enabled);
 
     ID3D11Texture2D *back_buffer = 0;
     swapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&back_buffer);
@@ -180,8 +216,21 @@ i32 main(i32 argc, i8** argv) {
     {
         ID3D10Blob* _VS;
         ID3D10Blob* _PS;
-        D3DX11CompileFromFile("triangle.hlsl", 0, 0, "VS", "vs_4_0", 0, 0, 0, &_VS, 0, 0);
-        D3DX11CompileFromFile("triangle.hlsl", 0, 0, "PS", "ps_4_0", 0, 0, 0, &_PS, 0, 0);
+        ID3D10Blob* err;
+
+        HRESULT vsres = D3DX11CompileFromFile("triangle.hlsl", 0, 0, "VS", "vs_4_0", 0, 0, 0, &_VS, &err, 0);
+        if(FAILED(vsres)) {
+            if(err != NULL)
+                printf("vs compile error: %s\n", err->GetBufferPointer());
+            unreachable();
+        }
+
+        HRESULT hsres = D3DX11CompileFromFile("triangle.hlsl", 0, 0, "PS", "ps_4_0", 0, 0, 0, &_PS, &err, 0);
+        if(FAILED(hsres)) {
+            if(err != NULL)
+                printf("ps compile error: %s\n", err->GetBufferPointer());
+            unreachable();
+        }
 
         device->CreateVertexShader(_VS->GetBufferPointer(), _VS->GetBufferSize(), NULL, &VS);
         device->CreatePixelShader( _PS->GetBufferPointer(), _PS->GetBufferSize(), NULL, &PS);
