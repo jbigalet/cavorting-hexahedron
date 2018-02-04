@@ -9,7 +9,6 @@
 #include "math.cpp"
 /* #include "input.h" */
 /* #include "input.cpp" */
-#include "Winuser.h"
 
 
 
