@@ -113,7 +113,10 @@ i32 main(i32 argc, i8** argv) {
 
     RegisterClassEx(&wc);
 
-    RECT wr = {0, 0, 1280, 720};
+    const u32 width = 1280;
+    const u32 height = 720;
+
+    RECT wr = {0, 0, width, height};
     AdjustWindowRect(&wr, WS_OVERLAPPEDWINDOW, FALSE);
 
     HWND window = CreateWindowEx(NULL,
@@ -147,7 +150,7 @@ i32 main(i32 argc, i8** argv) {
     scd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;     // use 32-bit color
     scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;      // how swap chain is to be used
     scd.OutputWindow = window;
-    scd.SampleDesc.Count = 4;                               // how many multisamples
+    scd.SampleDesc.Count = 1;                               // how many multisamples
     scd.Windowed = true;                                    // windowed/full-screen mode
 
     u32 creation_flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_DEBUG;
@@ -211,6 +214,8 @@ i32 main(i32 argc, i8** argv) {
     viewport.TopLeftY = 0;
     viewport.Width = wr.right - wr.left;
     viewport.Height = wr.bottom - wr.top;
+    viewport.MinDepth = 0;
+    viewport.MaxDepth = 1;
 
     ctx->RSSetViewports(1, &viewport);
 
@@ -226,8 +231,8 @@ i32 main(i32 argc, i8** argv) {
     tdesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
     tdesc.CPUAccessFlags = 0;
     tdesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    tdesc.Width = viewport.Width;
-    tdesc.Height = viewport.Height;
+    tdesc.Width = width;
+    tdesc.Height = height;
     tdesc.MipLevels = 1;
     tdesc.SampleDesc.Count = 1;
     tdesc.SampleDesc.Quality = 0;
@@ -251,7 +256,7 @@ i32 main(i32 argc, i8** argv) {
 
 
 
-    ctx->OMSetRenderTargets(1, &screen_rt, NULL);
+    ctx->OMSetRenderTargets(1, &screen_rt, depth_stencil_view);
     ctx->OMSetDepthStencilState(depth_stencil_state, 1);
 
 
@@ -268,7 +273,7 @@ i32 main(i32 argc, i8** argv) {
     rast_desc.DepthBiasClamp = 0.f;
     rast_desc.DepthClipEnable = true;
     rast_desc.FillMode = D3D11_FILL_SOLID;
-    rast_desc.FrontCounterClockwise = true;
+    rast_desc.FrontCounterClockwise = false;
     rast_desc.MultisampleEnable = false;
     rast_desc.ScissorEnable = false;
     rast_desc.SlopeScaledDepthBias = 0.f;
@@ -390,7 +395,7 @@ i32 main(i32 argc, i8** argv) {
             unreachable();
         }
 
-        HRESULT hsres = D3DX11CompileFromFile("triangle.hlsl", 0, 0, "PS", "ps_4_0", 0, 0, 0, &_PS, &err, 0);
+        HRESULT hsres = D3DX11CompileFromFile("triangle.hlsl", 0, 0, "PS", "ps_5_0", 0, 0, 0, &_PS, &err, 0);
         if(FAILED(hsres)) {
             if(err != NULL)
                 printf("ps compile error: %s\n", err->GetBufferPointer());
@@ -427,7 +432,7 @@ i32 main(i32 argc, i8** argv) {
 
 
 
-    // compute
+    // compute shaders
 
     ID3D11ComputeShader* CS;
     ID3D10Blob* _CS;
@@ -443,12 +448,25 @@ i32 main(i32 argc, i8** argv) {
 
 
 
+    ID3D11ComputeShader* CS_fix_indirect;
+    ID3D10Blob* _CS_fix_indirect;
+    res = D3DX11CompileFromFile("fix_indirect_buffer.compute.hlsl", 0, 0, "main", "cs_5_0", 0, 0, 0, &_CS_fix_indirect, &err, 0);
+    if(FAILED(res)) {
+        if(err != NULL)
+            printf("cs compile error: %s\n", err->GetBufferPointer());
+        unreachable();
+    }
+
+    device->CreateComputeShader(_CS_fix_indirect->GetBufferPointer(), _CS_fix_indirect->GetBufferSize(), NULL, &CS_fix_indirect);
+
+
+
     // uav
 
     D3D11_BUFFER_DESC uav_desc;
     ZeroMemory(&uav_desc, sizeof(D3D11_BUFFER_DESC));
-    u32 ele_size = sizeof(vec3f)*2;
-    u32 ele_count = 100000;             // TODO out of my ass
+    u32 ele_size = sizeof(vec3f)*2*3;
+    u32 ele_count = 1000000;             // TODO out of my ass
     uav_desc.ByteWidth = ele_size*ele_count;
     uav_desc.Usage = D3D11_USAGE_DEFAULT;
     uav_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
@@ -496,8 +514,8 @@ i32 main(i32 argc, i8** argv) {
     indirect_desc.Usage = D3D11_USAGE_DEFAULT;
     indirect_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
     indirect_desc.CPUAccessFlags = 0;
-    indirect_desc.MiscFlags = D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS;
-    indirect_desc.StructureByteStride = sizeof(f32);
+    indirect_desc.MiscFlags = D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS;// | D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
+    indirect_desc.StructureByteStride = sizeof(u32);
 
     D3D11_SUBRESOURCE_DATA indirect_buff_data;
     u32 indirect_buff_init[] = { 0, 1, 0, 0 };
@@ -509,13 +527,35 @@ i32 main(i32 argc, i8** argv) {
     res = device->CreateBuffer(&indirect_desc, &indirect_buff_data, &indirect_buf);
     check(!FAILED(res));
 
-/*     D3D11_UNORDERED_ACCESS_VIEW_DESC uav_desc; */
-/*     ZeroMemory(&uav_desc, sizeof(D3D11_UNORDERED_ACCESS_VIEW_DESC)); */
-/*     uav_desc.Format = DXGI_FORMAT_R32_UINT; */
-/*     uav_desc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER; */
-/*     uav_desc.Buffer.FirstElement = 0; */
-/*     uav_desc.Buffer.Flags = 0; */
-/*     uav_desc.Buffer.NumElements = 5; */
+
+    // view of the indirect buffer to multiply the vertex count by 3 from a compute =(
+
+    D3D11_UNORDERED_ACCESS_VIEW_DESC indirect_view_desc;
+    ZeroMemory(&indirect_view_desc, sizeof(D3D11_UNORDERED_ACCESS_VIEW_DESC));
+    /* indirect_view_desc.Format = DXGI_FORMAT_R32_TYPELESS; */
+    /* indirect_view_desc.Format = DXGI_FORMAT_UNKNOWN; */
+    indirect_view_desc.Format = DXGI_FORMAT_R32_UINT;
+    indirect_view_desc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+    indirect_view_desc.Buffer.FirstElement = 0;
+    indirect_view_desc.Buffer.NumElements = 4;
+    /* indirect_view_desc.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW; */
+
+    ID3D11UnorderedAccessView* indirect_view;
+    res = device->CreateUnorderedAccessView(indirect_buf, &indirect_view_desc, &indirect_view);
+    check(!FAILED(res));
+
+    // TODO understand why a srv doesnt work (writes dont work on resource views, maybe?)
+    /* D3D11_SHADER_RESOURCE_VIEW_DESC indirect_view_desc; */
+    /* ZeroMemory(&indirect_view_desc, sizeof(D3D11_SHADER_RESOURCE_VIEW_DESC)); */
+    /* indirect_view_desc.Format = DXGI_FORMAT_R32_UINT; */
+    /* indirect_view_desc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER; */
+    /* indirect_view_desc.Buffer.FirstElement = 0; */
+    /* indirect_view_desc.Buffer.NumElements = 4; */
+
+    /* ID3D11ShaderResourceView* indirect_view; */
+    /* res = device->CreateShaderResourceView(indirect_buf, &indirect_view_desc, &indirect_view); */
+    /* check(!FAILED(res)); */
+
 
 
 
@@ -604,8 +644,8 @@ i32 main(i32 argc, i8** argv) {
 
         ctx->CSSetShader(CS, NULL, 0);
         u32 zero = 0;
-        ctx->CSSetUnorderedAccessViews(0, 1, &uav, 0);
-        ctx->Dispatch(1, 1, 1);
+        ctx->CSSetUnorderedAccessViews(0, 1, &uav, &zero);
+        ctx->Dispatch(16, 16, 16);
 
         ID3D11UnorderedAccessView* null_uav = NULL;
         ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, NULL);
@@ -613,7 +653,20 @@ i32 main(i32 argc, i8** argv) {
 
 
 
+        // setup indirect buffer
+
         ctx->CopyStructureCount(indirect_buf, 0, uav);
+
+        // multiply count by 3 (as we want vertex count although we append whole triangles)
+        ctx->CSSetShader(CS_fix_indirect, NULL, 0);
+        /* ctx->CSSetShaderResources(0, 1, &indirect_view); */
+        ctx->CSSetUnorderedAccessViews(0, 1, &indirect_view, &zero);
+        ctx->Dispatch(1, 1, 1);
+
+        ID3D11ShaderResourceView* null_srv = NULL;
+        /* ctx->CSSetShaderResources(0, 1, &null_srv); */
+        ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, NULL);
+        ctx->CSSetShader(NULL, NULL, 0);
 
 
 
@@ -644,7 +697,6 @@ i32 main(i32 argc, i8** argv) {
         /* ctx->DrawIndexed(array_size(indices), 0, 0); */
         ctx->DrawInstancedIndirect(indirect_buf, 0);
 
-        ID3D11ShaderResourceView* null_srv = NULL;
         ctx->VSSetShaderResources(0, 1, &null_srv);
 
 
