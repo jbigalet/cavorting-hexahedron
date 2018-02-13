@@ -6,7 +6,7 @@
 #define GLOBAL_STATE __declspec(dllexport)
 #pragma comment(linker, "/subsystem:windows /ENTRY:mainCRTStartup")
 
-#include "Windowsx.h"
+#include <Windowsx.h>
 
 #include "math.cpp"
 /* #include "input.h" */
@@ -263,6 +263,7 @@ i32 main(i32 argc, i8** argv) {
 
     rast_desc.AntialiasedLineEnable = false;
     rast_desc.CullMode = D3D11_CULL_BACK;
+    /* rast_desc.CullMode = D3D11_CULL_NONE; */
     rast_desc.DepthBias = 0;
     rast_desc.DepthBiasClamp = 0.f;
     rast_desc.DepthClipEnable = true;
@@ -326,12 +327,12 @@ i32 main(i32 argc, i8** argv) {
     };
 
     u16 indices[] = {
-        0, 1, 2, 0, 2, 3,
-        4, 6, 5, 4, 7, 6,
-        4, 5, 1, 4, 1, 0,
-        3, 2, 6, 3, 6, 7,
-        1, 5, 6, 1, 6, 2,
-        4, 0, 3, 4, 3, 7,
+        0, 1, 2,   0, 2, 3,
+        4, 6, 5,   4, 7, 6,
+        4, 5, 1,   4, 1, 0,
+        3, 2, 6,   3, 6, 7,
+        1, 5, 6,   1, 6, 2,
+        4, 0, 3,   4, 3, 7,
     };
 
 
@@ -399,16 +400,13 @@ i32 main(i32 argc, i8** argv) {
         device->CreateVertexShader(_VS->GetBufferPointer(), _VS->GetBufferSize(), NULL, &VS);
         device->CreatePixelShader( _PS->GetBufferPointer(), _PS->GetBufferSize(), NULL, &PS);
 
-        ctx->VSSetShader(VS, 0, 0);
-        ctx->PSSetShader(PS, 0, 0);
-
         D3D11_INPUT_ELEMENT_DESC attr[] = {
             { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
             { "COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 3*sizeof(f32), D3D11_INPUT_PER_VERTEX_DATA, 0 },
         };
 
         device->CreateInputLayout(attr, array_size(attr), _VS->GetBufferPointer(), _VS->GetBufferSize(), &attr_layout);
-        ctx->IASetInputLayout(attr_layout);
+        /* ctx->IASetInputLayout(attr_layout); */
     }
 
 
@@ -426,6 +424,102 @@ i32 main(i32 argc, i8** argv) {
     check(!FAILED(res));
 
     ctx->VSSetConstantBuffers(0, 1, &ubo);
+
+
+
+    // compute
+
+    ID3D11ComputeShader* CS;
+    ID3D10Blob* _CS;
+    ID3D10Blob* err;
+    res = D3DX11CompileFromFile("compute.hlsl", 0, 0, "main", "cs_5_0", 0, 0, 0, &_CS, &err, 0);
+    if(FAILED(res)) {
+        if(err != NULL)
+            printf("cs compile error: %s\n", err->GetBufferPointer());
+        unreachable();
+    }
+
+    device->CreateComputeShader(_CS->GetBufferPointer(), _CS->GetBufferSize(), NULL, &CS);
+
+
+
+    // uav
+
+    D3D11_BUFFER_DESC uav_desc;
+    ZeroMemory(&uav_desc, sizeof(D3D11_BUFFER_DESC));
+    u32 ele_size = sizeof(vec3f)*2;
+    u32 ele_count = 100000;             // TODO out of my ass
+    uav_desc.ByteWidth = ele_size*ele_count;
+    uav_desc.Usage = D3D11_USAGE_DEFAULT;
+    uav_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+    uav_desc.CPUAccessFlags = 0;
+    uav_desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+    uav_desc.StructureByteStride = ele_size;
+
+    ID3D11Buffer* ua;
+    res = device->CreateBuffer(&uav_desc, NULL, &ua);
+    check(!FAILED(res));
+
+    D3D11_UNORDERED_ACCESS_VIEW_DESC uav_view_desc;
+    ZeroMemory(&uav_view_desc, sizeof(D3D11_UNORDERED_ACCESS_VIEW_DESC));
+    uav_view_desc.Format = DXGI_FORMAT_UNKNOWN;
+    uav_view_desc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+    uav_view_desc.Buffer.FirstElement = 0;
+    uav_view_desc.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_APPEND;
+    uav_view_desc.Buffer.NumElements = ele_count;
+
+    ID3D11UnorderedAccessView* uav;
+    res = device->CreateUnorderedAccessView(ua, &uav_view_desc, &uav);
+    check(!FAILED(res));
+
+
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc;
+    ZeroMemory(&srv_desc, sizeof(D3D11_SHADER_RESOURCE_VIEW_DESC));
+    srv_desc.Format = DXGI_FORMAT_UNKNOWN;
+    srv_desc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+    srv_desc.Buffer.FirstElement = 0;
+    srv_desc.Buffer.NumElements = ele_count;
+
+    ID3D11ShaderResourceView* srv;
+    res = device->CreateShaderResourceView(ua, &srv_desc, &srv);
+    check(!FAILED(res));
+
+
+
+
+    // indirect draw buffer
+
+    D3D11_BUFFER_DESC indirect_desc;
+    ZeroMemory(&indirect_desc, sizeof(D3D11_BUFFER_DESC));
+    indirect_desc.ByteWidth = sizeof(u32)*4;
+    indirect_desc.Usage = D3D11_USAGE_DEFAULT;
+    indirect_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+    indirect_desc.CPUAccessFlags = 0;
+    indirect_desc.MiscFlags = D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS;
+    indirect_desc.StructureByteStride = sizeof(f32);
+
+    D3D11_SUBRESOURCE_DATA indirect_buff_data;
+    u32 indirect_buff_init[] = { 0, 1, 0, 0 };
+    indirect_buff_data.pSysMem = indirect_buff_init;
+    indirect_buff_data.SysMemPitch = 0;
+    indirect_buff_data.SysMemSlicePitch = 0;
+
+    ID3D11Buffer* indirect_buf;
+    res = device->CreateBuffer(&indirect_desc, &indirect_buff_data, &indirect_buf);
+    check(!FAILED(res));
+
+/*     D3D11_UNORDERED_ACCESS_VIEW_DESC uav_desc; */
+/*     ZeroMemory(&uav_desc, sizeof(D3D11_UNORDERED_ACCESS_VIEW_DESC)); */
+/*     uav_desc.Format = DXGI_FORMAT_R32_UINT; */
+/*     uav_desc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER; */
+/*     uav_desc.Buffer.FirstElement = 0; */
+/*     uav_desc.Buffer.Flags = 0; */
+/*     uav_desc.Buffer.NumElements = 5; */
+
+
+
+
 
 
     mat4 proj = mat4::proj(0.1f, 200.f, 60.f*DEG_TO_RAD, (u32)viewport.Width, (u32)viewport.Height);
@@ -505,6 +599,24 @@ i32 main(i32 argc, i8** argv) {
         ctx->UpdateSubresource(ubo, 0, NULL, &camproj, 0, 0);
 
 
+
+        // dispatch
+
+        ctx->CSSetShader(CS, NULL, 0);
+        u32 zero = 0;
+        ctx->CSSetUnorderedAccessViews(0, 1, &uav, 0);
+        ctx->Dispatch(1, 1, 1);
+
+        ID3D11UnorderedAccessView* null_uav = NULL;
+        ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, NULL);
+        ctx->CSSetShader(NULL, NULL, 0);
+
+
+
+        ctx->CopyStructureCount(indirect_buf, 0, uav);
+
+
+
         // render
 
         vec4f clear_color = {0.5f, 0.f, 0.5f, 1.0f};
@@ -512,18 +624,28 @@ i32 main(i32 argc, i8** argv) {
         ctx->ClearDepthStencilView(depth_stencil_view, D3D11_CLEAR_DEPTH|D3D11_CLEAR_STENCIL, 1.f, 0);
 
 
-        /* u32 stride = sizeof(f32)*7; */
-        u32 stride = sizeof(f32)*6;
-        u32 offset = 0;
-        /* ctx->VSSetConstantBuffers(0, 1, &ubo); */
-        ctx->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
-        ctx->IASetIndexBuffer(ebo, DXGI_FORMAT_R16_UINT, 0);
+        ctx->VSSetShader(VS, 0, 0);
+        ctx->PSSetShader(PS, 0, 0);
+
+
+        /* u32 stride = sizeof(f32)*6; */
+        /* u32 offset = 0; */
+        /* ctx->IASetVertexBuffers(0, 1, &vbo, &stride, &offset); */
+        /* ctx->IASetVertexBuffers(0, 1, &ua, &stride, &offset); */
+        /* ctx->IASetIndexBuffer(ebo, DXGI_FORMAT_R16_UINT, 0); */
         ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+        ctx->VSSetShaderResources(0, 1, &srv);
 
         ctx->RSSetState(rast_state);
 
-        /* ctx->Draw(array_size(vertices), 0); */
-        ctx->DrawIndexed(array_size(indices), 0, 0);
+        /* ctx->Draw(array_size(vertices)/6, 0); */
+        /* ctx->Draw(3, 0); */
+        /* ctx->DrawIndexed(array_size(indices), 0, 0); */
+        ctx->DrawInstancedIndirect(indirect_buf, 0);
+
+        ID3D11ShaderResourceView* null_srv = NULL;
+        ctx->VSSetShaderResources(0, 1, &null_srv);
 
 
         swapchain->Present(0, 0);
