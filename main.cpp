@@ -431,6 +431,21 @@ i32 main(i32 argc, i8** argv) {
     ctx->VSSetConstantBuffers(0, 1, &ubo);
 
 
+    D3D11_BUFFER_DESC ubo2_desc;
+    ZeroMemory(&ubo2_desc, sizeof(D3D11_BUFFER_DESC));
+    ubo2_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    ubo2_desc.ByteWidth = sizeof(f32)*4;  // must be at least 16 bytes..
+    ubo2_desc.CPUAccessFlags = 0;
+    ubo2_desc.Usage = D3D11_USAGE_DEFAULT;
+
+    ID3D11Buffer* ubo2;
+    res = device->CreateBuffer(&ubo2_desc, NULL, &ubo2);
+    check(!FAILED(res));
+
+    ctx->CSSetConstantBuffers(0, 1, &ubo2);
+
+
+
 
     // compute shaders
 
@@ -466,7 +481,7 @@ i32 main(i32 argc, i8** argv) {
     D3D11_BUFFER_DESC uav_desc;
     ZeroMemory(&uav_desc, sizeof(D3D11_BUFFER_DESC));
     u32 ele_size = sizeof(vec3f)*2*3;
-    u32 ele_count = 1000000;             // TODO out of my ass
+    u32 ele_count = 10000000;             // TODO out of my ass
     uav_desc.ByteWidth = ele_size*ele_count;
     uav_desc.Usage = D3D11_USAGE_DEFAULT;
     uav_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
@@ -564,7 +579,7 @@ i32 main(i32 argc, i8** argv) {
 
     mat4 proj = mat4::proj(0.1f, 200.f, 60.f*DEG_TO_RAD, (u32)viewport.Width, (u32)viewport.Height);
     /* mat4 proj = mat4::id(); */
-    vec3f cam_pos = vec3f { 0.5f, 0.5f, 10.f };
+    vec3f cam_pos = vec3f { 0.f, 0.f, 10.f };
     f32 rot_x = 0.f;
     f32 rot_y = 0.f;
 
@@ -576,11 +591,26 @@ i32 main(i32 argc, i8** argv) {
 
     bool should_close = false;
     auto last_time = std::chrono::high_resolution_clock::now();
+    f32 acu_time = 0;
+    u32 acu_frame_count = 0;
+    f32 total_time = 0;
     while(!should_close) {
         auto time = std::chrono::high_resolution_clock::now();
         f32 dt = std::chrono::duration<f32, std::milli>(time-last_time).count();
         dt /= 1000.f;
         last_time = time;
+
+        total_time += dt;
+
+        acu_time += dt;
+        acu_frame_count++;
+
+        if(acu_time > 1.f) {
+            printf("FPS: %f\n", acu_frame_count/acu_time);
+            acu_time = 0.f;
+            acu_frame_count = 0;
+        }
+
 
         // reset input stuff TODO update input.h/cpp
         for(u32 i=0 ; i<256 ; i++) {
@@ -597,14 +627,20 @@ i32 main(i32 argc, i8** argv) {
         mouse.right.released = false;
 
 
-        if(PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
+        // TODO handle this properly
+        bool peeked = true;
+        while(peeked) {
+            if(PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            } else {
+                peeked = false;
+            }
 
-        if(msg.message == WM_QUIT
-                || keys[VK_ESCAPE].pressed)
-            should_close = true;
+            if(msg.message == WM_QUIT
+                    || keys[VK_ESCAPE].pressed)
+                should_close = true;
+        }
 
 
 
@@ -637,6 +673,7 @@ i32 main(i32 argc, i8** argv) {
         mat4 camproj = mat4::id() * proj * inv(cam_trans);
 
         ctx->UpdateSubresource(ubo, 0, NULL, &camproj, 0, 0);
+        ctx->UpdateSubresource(ubo2, 0, NULL, &total_time, 0, 0);
 
 
 
@@ -645,7 +682,7 @@ i32 main(i32 argc, i8** argv) {
         ctx->CSSetShader(CS, NULL, 0);
         u32 zero = 0;
         ctx->CSSetUnorderedAccessViews(0, 1, &uav, &zero);
-        ctx->Dispatch(16, 16, 16);
+        ctx->Dispatch(128, 128, 128);
 
         ID3D11UnorderedAccessView* null_uav = NULL;
         ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, NULL);
