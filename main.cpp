@@ -682,7 +682,8 @@ i32 main(i32 argc, i8** argv) {
         ctx->CSSetShader(CS, NULL, 0);
         u32 zero = 0;
         ctx->CSSetUnorderedAccessViews(0, 1, &uav, &zero);
-        ctx->Dispatch(128, 128, 128);
+		u32 dim = 32;
+        ctx->Dispatch(dim, dim, dim);
 
         ID3D11UnorderedAccessView* null_uav = NULL;
         ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, NULL);
