@@ -25,6 +25,8 @@ cbuffer ubo {
 /* } */
 
 void append_triangle(float3 a, float3 b, float3 c, float3 color) {
+	// flat shading
+
     /* append_vertex(a, color); */
     /* append_vertex(b, color); */
     /* append_vertex(c, color); */
@@ -33,9 +35,27 @@ void append_triangle(float3 a, float3 b, float3 c, float3 color) {
     t.e[1].position = a;
     t.e[2].position = c;
 
+	float3 norm = normalize(cross(b-a, c-a));
+	color = norm;
     t.e[0].color = color;
     t.e[1].color = color;
     t.e[2].color = color;
+
+    uav.Append(t);
+}
+
+void append_triangle_with_norms(float3 a, float3 b, float3 c, float3 na, float3 nb, float3 nc) {
+    /* append_vertex(a, color); */
+    /* append_vertex(b, color); */
+    /* append_vertex(c, color); */
+    Triangle t;
+    t.e[0].position = b;
+    t.e[1].position = a;
+    t.e[2].position = c;
+
+    t.e[0].color = nb;
+    t.e[1].color = na;
+    t.e[2].color = nc;
 
     uav.Append(t);
 }
@@ -383,6 +403,7 @@ void main(uint3 id: SV_DispatchThreadID) {
 			}
 	
 	float3 tri[3];
+	float3 norms[3];
 	uint tri_idx = 0;
 	uint bytes_idx = 0;
 	uint idx_in_byte = 0;
@@ -390,16 +411,42 @@ void main(uint3 id: SV_DispatchThreadID) {
 	int limit = byte % 4;
 	byte >>= 2;
 	while(limit > 0) {
+		
 		uint Ai = byte % 8;
 		uint Bi = (byte >> 3) % 8;
 		float3 A = pos + float3(Ai%2, (Ai>>1)%2, (Ai>>2)%2);
 		float3 B = pos + float3(Bi%2, (Bi>>1)%2, (Bi>>2)%2);
 		float t = vals[Bi]/(vals[Bi]-vals[Ai]);
 		tri[tri_idx] = t*A + (1-t)*B;
+		
+		// normals
+		
+		/*
+		float3 nA;
+		nA.x = val(A+float3(1, 0, 0)) - val(A+float3(-1, 0, 0));
+		nA.y = val(A+float3(0, 1, 0)) - val(A+float3(0, -1, 0));
+		nA.z = val(A+float3(0, 0, 1)) - val(A+float3(0, 0, -1));
+		nA = -normalize(nA);
+		
+		float3 nB;
+		nB.x = val(B+float3(1, 0, 0)) - val(B+float3(-1, 0, 0));
+		nB.y = val(B+float3(0, 1, 0)) - val(B+float3(0, -1, 0));
+		nB.z = val(B+float3(0, 0, 1)) - val(B+float3(0, 0, -1));
+		nB = -normalize(nB);
+		
+		norms[tri_idx] = t*nA + (1-t)*nB;
+		*/
+		
+		norms[tri_idx] = -normalize(float3(
+			val(tri[tri_idx]+float3(1, 0, 0)) - val(tri[tri_idx]+float3(-1, 0, 0)),
+			val(tri[tri_idx]+float3(0, 1, 0)) - val(tri[tri_idx]+float3(0, -1, 0)),
+			val(tri[tri_idx]+float3(0, 0, 1)) - val(tri[tri_idx]+float3(0, 0, -1))
+		));
+		
 		tri_idx++;
 		idx_in_byte++;
 		if(tri_idx == 3) {
-			append_triangle(tri[0]/10, tri[1]/10, tri[2]/10, float3(1, 0, 0)); 	
+			append_triangle_with_norms(tri[0]/10, tri[1]/10, tri[2]/10, norms[0], norms[1], norms[2]);
 			tri_idx = 0;
 			limit--;
 			if(limit == 0)
