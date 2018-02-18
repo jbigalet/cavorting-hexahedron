@@ -8,8 +8,9 @@ struct Triangle {
 };
 
 AppendStructuredBuffer<Triangle> uav : register(u0);
+RWBuffer<float> precomp : register(u1);
 
-
+static const uint precomp_dim = 131;
 
 cbuffer ubo {
     float time;
@@ -377,6 +378,7 @@ float val(float3 pos) {
 void main(uint3 id: SV_DispatchThreadID) {
 
 	float3 pos = id;
+	uint precomp_idx = (id.x+1) + precomp_dim*(id.y+1) + precomp_dim*precomp_dim*(id.z+1);
 	
 	float vals[8];
 	uint bitfield = 0u;
@@ -384,7 +386,7 @@ void main(uint3 id: SV_DispatchThreadID) {
         for(uint y=0 ; y<=1 ; y++)
             for(uint z=0 ; z<=1 ; z++) {
 				uint idx = x + 2*y + 4*z;
-				float v = val(pos+float3(x,y,z));
+				float v = precomp[precomp_idx + x + precomp_dim*y + precomp_dim*precomp_dim*z];
 				vals[idx] = v;
 				bitfield |= ((v > 0 ? 1 : 0) << idx);
 			}
@@ -397,6 +399,8 @@ void main(uint3 id: SV_DispatchThreadID) {
 	uint byte = mc_lut[bitfield][0];
 	int limit = byte % 4;
 	byte >>= 2;
+	
+	[allow_uav_condition]  // =(
 	while(limit > 0) {
 		
 		uint Ai = byte % 8;
@@ -406,11 +410,22 @@ void main(uint3 id: SV_DispatchThreadID) {
 		float t = vals[Bi]/(vals[Bi]-vals[Ai]);
 		tri[tri_idx] = t*A + (1-t)*B;
 		
-		norms[tri_idx] = -normalize(float3(
-			val(tri[tri_idx]+float3(1, 0, 0)) - val(tri[tri_idx]+float3(-1, 0, 0)),
-			val(tri[tri_idx]+float3(0, 1, 0)) - val(tri[tri_idx]+float3(0, -1, 0)),
-			val(tri[tri_idx]+float3(0, 0, 1)) - val(tri[tri_idx]+float3(0, 0, -1))
+		uint idx_A = precomp_idx + (Ai%2) + precomp_dim*((Ai>>1)%2) + precomp_dim*precomp_dim*((Ai>>2)%2);
+		float3 nA = -normalize(float3(
+			precomp[idx_A + 1] - precomp[idx_A - 1],
+			precomp[idx_A + precomp_dim] - precomp[idx_A - precomp_dim],
+			precomp[idx_A + precomp_dim*precomp_dim] - precomp[idx_A - precomp_dim*precomp_dim]
 		));
+
+		uint idx_B = precomp_idx + (Bi%2) + precomp_dim*((Bi>>1)%2) + precomp_dim*precomp_dim*((Bi>>2)%2);
+		float3 nB = -normalize(float3(
+			precomp[idx_B + 1] - precomp[idx_B - 1],
+			precomp[idx_B + precomp_dim] - precomp[idx_B - precomp_dim],
+			precomp[idx_B + precomp_dim*precomp_dim] - precomp[idx_B - precomp_dim*precomp_dim]
+		));
+		
+		norms[tri_idx] = normalize(t*nA + (1-t)*nB);
+
 		
 		tri_idx++;
 		idx_in_byte++;
