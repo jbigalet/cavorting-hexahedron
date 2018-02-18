@@ -341,7 +341,7 @@ static const uint mc_lut[256][3] = {
 };
 
 
-static const float dim = 32.f;
+static const float dim = 128.f;
 static const float size = 10.f;
 static const float voxel_size = size/dim;
 
@@ -362,31 +362,18 @@ float val(float3 pos) {
 
     float m = metaball(p, float3(0,0,0));
 
-    float s = fmod(time/5, 1.f)-0.5;
+    float s = fmod(time/5, 1.4f)-0.7;
     m += metaball(p, float3(s,s,s));
 
-    m += metaball(p, float3(fmod(time/2, 1.f)-0.5, -(fmod(time/3, 1.f)-0.5), fmod(time/4.f, 1.f)-0.5));
+    m += metaball(p, float3(fmod(time/2, 1.4f)-0.7, -(fmod(time/3, 1.4f)-0.7), fmod(time/4.f, 1.4f)-0.7));
 
-    m += metaball(p, float3(cos(time/4)/2, sin(time/3)/2, cos(-time/6)/2));
+    m += metaball(p, float3(cos(time/4)*0.7, sin(time/3)*0.7, cos(-time/6)*0.7));
 
     return m - 50.f;
 }
 
 
-bool should_draw(float3 pos) {
-    /* return val(pos) > 0.5f; */
-
-    bool inside = val(pos) > 0.5f;
-    for(uint x=0 ; x<=1 ; x++)
-        for(uint y=0 ; y<=1 ; y++)
-            for(uint z=0 ; z<=1 ; z++)
-                if(inside != (val(pos+float3(x,y,z))))
-                    return true;
-    return false;
-}
-
-
-[numthreads(1, 1, 1)]
+[numthreads(8, 8, 8)]
 void main(uint3 id: SV_DispatchThreadID) {
 
 	float3 pos = id;
@@ -418,24 +405,6 @@ void main(uint3 id: SV_DispatchThreadID) {
 		float3 B = pos + float3(Bi%2, (Bi>>1)%2, (Bi>>2)%2);
 		float t = vals[Bi]/(vals[Bi]-vals[Ai]);
 		tri[tri_idx] = t*A + (1-t)*B;
-		
-		// normals
-		
-		/*
-		float3 nA;
-		nA.x = val(A+float3(1, 0, 0)) - val(A+float3(-1, 0, 0));
-		nA.y = val(A+float3(0, 1, 0)) - val(A+float3(0, -1, 0));
-		nA.z = val(A+float3(0, 0, 1)) - val(A+float3(0, 0, -1));
-		nA = -normalize(nA);
-		
-		float3 nB;
-		nB.x = val(B+float3(1, 0, 0)) - val(B+float3(-1, 0, 0));
-		nB.y = val(B+float3(0, 1, 0)) - val(B+float3(0, -1, 0));
-		nB.z = val(B+float3(0, 0, 1)) - val(B+float3(0, 0, -1));
-		nB = -normalize(nB);
-		
-		norms[tri_idx] = t*nA + (1-t)*nB;
-		*/
 		
 		norms[tri_idx] = -normalize(float3(
 			val(tri[tri_idx]+float3(1, 0, 0)) - val(tri[tri_idx]+float3(-1, 0, 0)),
