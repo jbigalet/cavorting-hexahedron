@@ -474,9 +474,9 @@ i32 main(i32 argc, i8** argv) {
 
     device->CreateComputeShader(_CS_fix_indirect->GetBufferPointer(), _CS_fix_indirect->GetBufferSize(), NULL, &CS_fix_indirect);
 
-	
-	
-	ID3D11ComputeShader* CS_precomp;
+
+
+    ID3D11ComputeShader* CS_precomp;
     ID3D10Blob* _CS_precomp;
     res = D3DX11CompileFromFile("precomp.compute.hlsl", 0, 0, "main", "cs_5_0", 0, 0, 0, &_CS_precomp, &err, 0);
     if(FAILED(res)) {
@@ -487,7 +487,7 @@ i32 main(i32 argc, i8** argv) {
 
     device->CreateComputeShader(_CS_precomp->GetBufferPointer(), _CS_precomp->GetBufferSize(), NULL, &CS_precomp);
 
-	
+
 
 
     // uav
@@ -585,13 +585,13 @@ i32 main(i32 argc, i8** argv) {
     /* res = device->CreateShaderResourceView(indirect_buf, &indirect_view_desc, &indirect_view); */
     /* check(!FAILED(res)); */
 
-	
-	
-	// precomp tex
-	// TODO are 3d tex better/faster?
-	D3D11_BUFFER_DESC precomp_desc;
+
+
+    // precomp tex
+    // TODO are 3d tex better/faster?
+    D3D11_BUFFER_DESC precomp_desc;
     ZeroMemory(&precomp_desc, sizeof(D3D11_BUFFER_DESC));
-	u32 precomp_count = 131*131*131;  // 32 voxel + 1 (we store corners) + 2 (1 more corner in each direction for the normals)
+    u32 precomp_count = 131*131*131;  // 32 voxel + 1 (we store corners) + 2 (1 more corner in each direction for the normals)
     precomp_desc.ByteWidth = sizeof(f32)*precomp_count;
     precomp_desc.Usage = D3D11_USAGE_DEFAULT;
     precomp_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
@@ -603,7 +603,7 @@ i32 main(i32 argc, i8** argv) {
     res = device->CreateBuffer(&precomp_desc, NULL, &precomp_buf);
     check(!FAILED(res));
 
-	
+
     D3D11_UNORDERED_ACCESS_VIEW_DESC precomp_view_desc;
     ZeroMemory(&precomp_view_desc, sizeof(D3D11_UNORDERED_ACCESS_VIEW_DESC));
     precomp_view_desc.Format = DXGI_FORMAT_R32_FLOAT;
@@ -614,8 +614,8 @@ i32 main(i32 argc, i8** argv) {
     ID3D11UnorderedAccessView* precomp_view;
     res = device->CreateUnorderedAccessView(precomp_buf, &precomp_view_desc, &precomp_view);
     check(!FAILED(res));
-	
-	
+
+
 
 
 
@@ -720,27 +720,27 @@ i32 main(i32 argc, i8** argv) {
 
 
 
-		u32 dim = 128;
+        u32 dim = 128;
         u32 zero = 0;
         ID3D11ShaderResourceView* null_srv = NULL;
         ID3D11UnorderedAccessView* null_uav = NULL;
 
-		
+
         // dispatch precomp
-		
-		ctx->CSSetShader(CS_precomp, NULL, 0);
-		ctx->CSSetUnorderedAccessViews(0, 1, &precomp_view, &zero);
-		ctx->Dispatch(1, 131, 131);
-		ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, NULL);
+
+        ctx->CSSetShader(CS_precomp, NULL, 0);
+        ctx->CSSetUnorderedAccessViews(0, 1, &precomp_view, &zero);
+        ctx->Dispatch(1, 131, 131);
+        ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, NULL);
         ctx->CSSetShader(NULL, NULL, 0);
-		
-		
-		
-		// dispatch marching cube compute
+
+
+
+        // dispatch marching cube compute
 
         ctx->CSSetShader(CS, NULL, 0);
         ctx->CSSetUnorderedAccessViews(0, 1, &uav, &zero);
-		ctx->CSSetUnorderedAccessViews(1, 1, &precomp_view, &zero);
+        ctx->CSSetUnorderedAccessViews(1, 1, &precomp_view, &zero);
         ctx->Dispatch(dim/8, dim/8, dim/8);
         ctx->CSSetUnorderedAccessViews(1, 1, &null_uav, NULL);
         ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, NULL);
