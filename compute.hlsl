@@ -1,3 +1,5 @@
+#define CHUNK_SIZE 32
+
 static const float dim = (float)(CHUNK_SIZE);
 static const uint precomp_dim = (CHUNK_SIZE)+3;
 
@@ -16,6 +18,7 @@ RWBuffer<float> precomp : register(u1);
 
 cbuffer ubo {
     float time;
+    float3 corner;
 }
 
 
@@ -34,9 +37,9 @@ void append_triangle(float3 a, float3 b, float3 c, float3 color) {
     /* append_vertex(b, color); */
     /* append_vertex(c, color); */
     Triangle t;
-    t.e[0].position = b;
-    t.e[1].position = a;
-    t.e[2].position = c;
+    t.e[0].position = b + corner;
+    t.e[1].position = a + corner;
+    t.e[2].position = c + corner;
 
     float3 norm = normalize(cross(b-a, c-a));
     color = norm;
@@ -52,9 +55,9 @@ void append_triangle_with_norms(float3 a, float3 b, float3 c, float3 na, float3 
     /* append_vertex(b, color); */
     /* append_vertex(c, color); */
     Triangle t;
-    t.e[0].position = b;
-    t.e[1].position = a;
-    t.e[2].position = c;
+    t.e[0].position = b + corner;
+    t.e[1].position = a + corner;
+    t.e[2].position = c + corner;
 
     t.e[0].color = nb;
     t.e[1].color = na;
@@ -63,7 +66,7 @@ void append_triangle_with_norms(float3 a, float3 b, float3 c, float3 na, float3 
     uav.Append(t);
 }
 
-void append_aabb(float3 corner, float size=1.f, float3 color=float3(1, 0, 0)) {
+void append_aabb(float3 corner, float size=1.f/dim, float3 color=float3(1, 0, 0)) {
     append_triangle(corner + float3(0.f, size, size), corner + float3(0.f, 0.f, size), corner + float3(size, size, size), color); // Z+
     append_triangle(corner + float3(size, size, size), corner + float3(0.f, 0.f, size), corner + float3(size, 0.f, size), color);
 
@@ -378,7 +381,6 @@ float val(float3 pos) {
 [numthreads(8, 8, 8)]
 void main(uint3 id: SV_DispatchThreadID) {
 
-    float3 pos = id;
     uint precomp_idx = (id.x+1) + precomp_dim*(id.y+1) + precomp_dim*precomp_dim*(id.z+1);
 
     float vals[8];
@@ -391,6 +393,11 @@ void main(uint3 id: SV_DispatchThreadID) {
                 vals[idx] = v;
                 bitfield |= ((v > 0 ? 1 : 0) << idx);
             }
+
+    /* if(bitfield != 0 && bitfield != 255) { */
+    /*     append_aabb(id/dim); */
+    /*     return; */
+    /* } */
 
     float3 tri[3];
     float3 norms[3];
@@ -406,8 +413,8 @@ void main(uint3 id: SV_DispatchThreadID) {
 
         uint Ai = byte % 8;
         uint Bi = (byte >> 3) % 8;
-        float3 A = pos + float3(Ai%2, (Ai>>1)%2, (Ai>>2)%2);
-        float3 B = pos + float3(Bi%2, (Bi>>1)%2, (Bi>>2)%2);
+        float3 A = id + float3(Ai%2, (Ai>>1)%2, (Ai>>2)%2);
+        float3 B = id + float3(Bi%2, (Bi>>1)%2, (Bi>>2)%2);
         float t = vals[Bi]/(vals[Bi]-vals[Ai]);
         tri[tri_idx] = t*A + (1-t)*B;
 
@@ -431,7 +438,7 @@ void main(uint3 id: SV_DispatchThreadID) {
         tri_idx++;
         idx_in_byte++;
         if(tri_idx == 3) {
-            append_triangle_with_norms(tri[0]/10, tri[1]/10, tri[2]/10, norms[0], norms[1], norms[2]);
+            append_triangle_with_norms(tri[0]/dim, tri[1]/dim, tri[2]/dim, norms[0], norms[1], norms[2]);
             tri_idx = 0;
             limit--;
             if(limit == 0)
@@ -448,9 +455,6 @@ void main(uint3 id: SV_DispatchThreadID) {
             byte >>= 2;
         }
     }
-
-    //if(should_draw(id))
-    //    append_aabb((id/dim - float3(0.5, 0.5, 0.5))*size, voxel_size);
 }
 
 

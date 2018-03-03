@@ -29,6 +29,7 @@ static void debug_printf(ccstring format, ...) {
     va_end(args);
 
     OutputDebugStringA(str);
+    free(str);
 }
 
 #define printf debug_printf

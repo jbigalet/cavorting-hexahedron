@@ -47,5 +47,5 @@ float4 PS(float4 p : SV_POSITION, float3 color : COLOR) : SV_TARGET {
     /* c = clamp(linear_depth(c), 0, 1); */
     /* c = p.z > 0.9999 ? 1 : 0; */
     //return float4(float3(c,c,c), 1.f);
-	return float4(color, 1.f);
+    return float4(color, 1.f);
 }

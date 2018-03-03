@@ -91,6 +91,8 @@ LRESULT CALLBACK WindowProc(HWND hWnd, u32 message, WPARAM wParam, LPARAM lParam
 
 i32 main(i32 argc, i8** argv) {
     const u32 chunk_size = 32;
+    const u32 max_chunk_count = 1000;
+    const u32 max_precomp_buf_count = max_chunk_count;
 
 
     /* AttachConsole(ATTACH_PARENT_PROCESS); */
@@ -285,6 +287,14 @@ i32 main(i32 argc, i8** argv) {
     assert(!FAILED(res));
 
 
+    // wireframe rasterization state
+    rast_desc.FillMode = D3D11_FILL_WIREFRAME;
+
+    ID3D11RasterizerState* wireframe_rast_state;
+    res = device->CreateRasterizerState(&rast_desc, &wireframe_rast_state);
+    assert(!FAILED(res));
+
+
 
 
     // setup other stuffs
@@ -419,6 +429,34 @@ i32 main(i32 argc, i8** argv) {
 
 
 
+    // chunk wireframe shader
+    ID3D11VertexShader *chunk_VS;
+    ID3D11PixelShader  *chunk_PS;
+    {
+        ID3D10Blob* _VS;
+        ID3D10Blob* _PS;
+        ID3D10Blob* err;
+
+        HRESULT vsres = D3DX11CompileFromFile("chunk_wireframe.hlsl", 0, 0, "VS", "vs_4_0", 0, 0, 0, &_VS, &err, 0);
+        if(FAILED(vsres)) {
+            if(err != NULL)
+                printf("vs compile error: %s\n", err->GetBufferPointer());
+            unreachable();
+        }
+
+        HRESULT hsres = D3DX11CompileFromFile("chunk_wireframe.hlsl", 0, 0, "PS", "ps_5_0", 0, 0, 0, &_PS, &err, 0);
+        if(FAILED(hsres)) {
+            if(err != NULL)
+                printf("ps compile error: %s\n", err->GetBufferPointer());
+            unreachable();
+        }
+
+        device->CreateVertexShader(_VS->GetBufferPointer(), _VS->GetBufferSize(), NULL, &chunk_VS);
+        device->CreatePixelShader( _PS->GetBufferPointer(), _PS->GetBufferSize(), NULL, &chunk_PS);
+    }
+
+
+
     // ubo
     D3D11_BUFFER_DESC ubo_desc;
     ZeroMemory(&ubo_desc, sizeof(D3D11_BUFFER_DESC));
@@ -437,7 +475,7 @@ i32 main(i32 argc, i8** argv) {
     D3D11_BUFFER_DESC ubo2_desc;
     ZeroMemory(&ubo2_desc, sizeof(D3D11_BUFFER_DESC));
     ubo2_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    ubo2_desc.ByteWidth = sizeof(f32)*4;  // must be at least 16 bytes..
+    ubo2_desc.ByteWidth = sizeof(f32)*4;  // time + chunk corner
     ubo2_desc.CPUAccessFlags = 0;
     ubo2_desc.Usage = D3D11_USAGE_DEFAULT;
 
@@ -452,6 +490,7 @@ i32 main(i32 argc, i8** argv) {
 
     // compute shaders
 
+    printf("chunk size: %s\n", std::to_string(chunk_size).c_str());
     const D3D10_SHADER_MACRO compute_macros[] = {
         {"CHUNK_SIZE", std::to_string(chunk_size).c_str()},
         {NULL, NULL}  // null terminated array
@@ -502,8 +541,8 @@ i32 main(i32 argc, i8** argv) {
 
     D3D11_BUFFER_DESC uav_desc;
     ZeroMemory(&uav_desc, sizeof(D3D11_BUFFER_DESC));
-    u32 ele_size = sizeof(vec3f)*2*3;
-    u32 ele_count = 10000000;             // TODO out of my ass
+    u32 ele_size = sizeof(vec3f)*2*3;  // pos + color ; *3 as we store a triangle
+    u32 ele_count = (chunk_size*chunk_size*chunk_size*5);  // TODO not sure if we can realisticly get the max triangle for each voxel
     uav_desc.ByteWidth = ele_size*ele_count;
     uav_desc.Usage = D3D11_USAGE_DEFAULT;
     uav_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
@@ -511,9 +550,6 @@ i32 main(i32 argc, i8** argv) {
     uav_desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
     uav_desc.StructureByteStride = ele_size;
 
-    ID3D11Buffer* ua;
-    res = device->CreateBuffer(&uav_desc, NULL, &ua);
-    check(!FAILED(res));
 
     D3D11_UNORDERED_ACCESS_VIEW_DESC uav_view_desc;
     ZeroMemory(&uav_view_desc, sizeof(D3D11_UNORDERED_ACCESS_VIEW_DESC));
@@ -523,11 +559,6 @@ i32 main(i32 argc, i8** argv) {
     uav_view_desc.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_APPEND;
     uav_view_desc.Buffer.NumElements = ele_count;
 
-    ID3D11UnorderedAccessView* uav;
-    res = device->CreateUnorderedAccessView(ua, &uav_view_desc, &uav);
-    check(!FAILED(res));
-
-
 
     D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc;
     ZeroMemory(&srv_desc, sizeof(D3D11_SHADER_RESOURCE_VIEW_DESC));
@@ -536,9 +567,20 @@ i32 main(i32 argc, i8** argv) {
     srv_desc.Buffer.FirstElement = 0;
     srv_desc.Buffer.NumElements = ele_count;
 
-    ID3D11ShaderResourceView* srv;
-    res = device->CreateShaderResourceView(ua, &srv_desc, &srv);
-    check(!FAILED(res));
+    ID3D11UnorderedAccessView* chunk_uavs[max_chunk_count];
+    ID3D11ShaderResourceView*  chunk_srvs[max_chunk_count];
+
+    for(u32 i=0 ; i<max_chunk_count ; i++) {
+        ID3D11Buffer* ua;
+        res = device->CreateBuffer(&uav_desc, NULL, &ua);
+        check(!FAILED(res));
+
+        res = device->CreateUnorderedAccessView(ua, &uav_view_desc, &chunk_uavs[i]);
+        check(!FAILED(res));
+
+        res = device->CreateShaderResourceView(ua, &srv_desc, &chunk_srvs[i]);
+        check(!FAILED(res));
+    }
 
 
 
@@ -560,10 +602,6 @@ i32 main(i32 argc, i8** argv) {
     indirect_buff_data.SysMemPitch = 0;
     indirect_buff_data.SysMemSlicePitch = 0;
 
-    ID3D11Buffer* indirect_buf;
-    res = device->CreateBuffer(&indirect_desc, &indirect_buff_data, &indirect_buf);
-    check(!FAILED(res));
-
 
     // view of the indirect buffer to multiply the vertex count by 3 from a compute =(
 
@@ -577,9 +615,15 @@ i32 main(i32 argc, i8** argv) {
     indirect_view_desc.Buffer.NumElements = 4;
     /* indirect_view_desc.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW; */
 
-    ID3D11UnorderedAccessView* indirect_view;
-    res = device->CreateUnorderedAccessView(indirect_buf, &indirect_view_desc, &indirect_view);
-    check(!FAILED(res));
+    ID3D11Buffer* indirect_bufs[max_chunk_count];
+    ID3D11UnorderedAccessView* indirect_views[max_chunk_count];
+    for(u32 i=0 ; i<max_chunk_count ; i++) {
+        res = device->CreateBuffer(&indirect_desc, &indirect_buff_data, &indirect_bufs[i]);
+        check(!FAILED(res));
+
+        res = device->CreateUnorderedAccessView(indirect_bufs[i], &indirect_view_desc, &indirect_views[i]);
+        check(!FAILED(res));
+    }
 
     // TODO understand why a srv doesnt work (writes dont work on resource views, maybe?)
     /* D3D11_SHADER_RESOURCE_VIEW_DESC indirect_view_desc; */
@@ -607,10 +651,6 @@ i32 main(i32 argc, i8** argv) {
     precomp_desc.MiscFlags = D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS;// | D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
     precomp_desc.StructureByteStride = sizeof(u32);
 
-    ID3D11Buffer* precomp_buf;
-    res = device->CreateBuffer(&precomp_desc, NULL, &precomp_buf);
-    check(!FAILED(res));
-
 
     D3D11_UNORDERED_ACCESS_VIEW_DESC precomp_view_desc;
     ZeroMemory(&precomp_view_desc, sizeof(D3D11_UNORDERED_ACCESS_VIEW_DESC));
@@ -619,10 +659,15 @@ i32 main(i32 argc, i8** argv) {
     precomp_view_desc.Buffer.FirstElement = 0;
     precomp_view_desc.Buffer.NumElements = precomp_count;
 
-    ID3D11UnorderedAccessView* precomp_view;
-    res = device->CreateUnorderedAccessView(precomp_buf, &precomp_view_desc, &precomp_view);
-    check(!FAILED(res));
+    ID3D11Buffer* precomp_bufs[max_precomp_buf_count];
+    ID3D11UnorderedAccessView* precomp_views[max_precomp_buf_count];
+    for(u32 i=0 ; i<max_precomp_buf_count ; i++) {
+        res = device->CreateBuffer(&precomp_desc, NULL, &precomp_bufs[i]);
+        check(!FAILED(res));
 
+        res = device->CreateUnorderedAccessView(precomp_bufs[i], &precomp_view_desc, &precomp_views[i]);
+        check(!FAILED(res));
+    }
 
 
 
@@ -645,6 +690,7 @@ i32 main(i32 argc, i8** argv) {
     f32 acu_time = 0;
     u32 acu_frame_count = 0;
     f32 total_time = 0;
+    bool first = true;
     while(!should_close) {
         auto time = std::chrono::high_resolution_clock::now();
         f32 dt = std::chrono::duration<f32, std::milli>(time-last_time).count();
@@ -727,49 +773,66 @@ i32 main(i32 argc, i8** argv) {
         ctx->UpdateSubresource(ubo2, 0, NULL, &total_time, 0, 0);
 
 
-
         u32 dim = chunk_size;
         u32 zero = 0;
         ID3D11ShaderResourceView* null_srv = NULL;
         ID3D11UnorderedAccessView* null_uav = NULL;
 
+        if(true || first) {
+            u32 idx = 0;
 
-        // dispatch precomp
+            for(i32 x=-2 ; x<2 ; x++)
+            for(i32 y=-2 ; y<2 ; y++)
+            for(i32 z=-2 ; z<2 ; z++) {
 
-        ctx->CSSetShader(CS_precomp, NULL, 0);
-        ctx->CSSetUnorderedAccessViews(0, 1, &precomp_view, &zero);
-        ctx->Dispatch(1, chunk_size+3, chunk_size+3);
-        ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, NULL);
-        ctx->CSSetShader(NULL, NULL, 0);
-
-
-
-        // dispatch marching cube compute
-
-        ctx->CSSetShader(CS, NULL, 0);
-        ctx->CSSetUnorderedAccessViews(0, 1, &uav, &zero);
-        ctx->CSSetUnorderedAccessViews(1, 1, &precomp_view, &zero);
-        ctx->Dispatch(dim/8, dim/8, dim/8);
-        ctx->CSSetUnorderedAccessViews(1, 1, &null_uav, NULL);
-        ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, NULL);
-        ctx->CSSetShader(NULL, NULL, 0);
+                f32 _ubo[] = {
+                    total_time,
+                    (f32)x,
+                    (f32)y,
+                    (f32)z,
+                };
+                ctx->UpdateSubresource(ubo2, 0, NULL, _ubo, 0, 0);
 
 
+                // dispatch precomp
 
-        // setup indirect buffer
+                ctx->CSSetShader(CS_precomp, NULL, 0);
+                ctx->CSSetUnorderedAccessViews(0, 1, &precomp_views[idx], &zero);
+                ctx->Dispatch(1, chunk_size+3, chunk_size+3);
+                ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, NULL);
+                ctx->CSSetShader(NULL, NULL, 0);
 
-        ctx->CopyStructureCount(indirect_buf, 0, uav);
 
-        // multiply count by 3 (as we want vertex count although we append whole triangles)
-        ctx->CSSetShader(CS_fix_indirect, NULL, 0);
-        /* ctx->CSSetShaderResources(0, 1, &indirect_view); */
-        ctx->CSSetUnorderedAccessViews(0, 1, &indirect_view, &zero);
-        ctx->Dispatch(1, 1, 1);
 
-        /* ctx->CSSetShaderResources(0, 1, &null_srv); */
-        ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, NULL);
-        ctx->CSSetShader(NULL, NULL, 0);
+                // dispatch marching cube compute
 
+                ctx->CSSetShader(CS, NULL, 0);
+                ctx->CSSetUnorderedAccessViews(0, 1, &chunk_uavs[idx], &zero);
+                ctx->CSSetUnorderedAccessViews(1, 1, &precomp_views[idx], &zero);
+                ctx->Dispatch(dim/8, dim/8, dim/8);
+                ctx->CSSetUnorderedAccessViews(1, 1, &null_uav, NULL);
+                ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, NULL);
+                ctx->CSSetShader(NULL, NULL, 0);
+
+
+
+                // setup indirect buffer
+
+                ctx->CopyStructureCount(indirect_bufs[idx], 0, chunk_uavs[idx]);
+
+                // multiply count by 3 (as we want vertex count although we append whole triangles)
+                ctx->CSSetShader(CS_fix_indirect, NULL, 0);
+                /* ctx->CSSetShaderResources(0, 1, &indirect_view); */
+                ctx->CSSetUnorderedAccessViews(0, 1, &indirect_views[idx], &zero);
+                ctx->Dispatch(1, 1, 1);
+
+                /* ctx->CSSetShaderResources(0, 1, &null_srv); */
+                ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, NULL);
+                ctx->CSSetShader(NULL, NULL, 0);
+
+                idx++;
+            }
+        }
 
 
         // render
@@ -782,7 +845,6 @@ i32 main(i32 argc, i8** argv) {
         ctx->VSSetShader(VS, 0, 0);
         ctx->PSSetShader(PS, 0, 0);
 
-
         /* u32 stride = sizeof(f32)*6; */
         /* u32 offset = 0; */
         /* ctx->IASetVertexBuffers(0, 1, &vbo, &stride, &offset); */
@@ -790,19 +852,33 @@ i32 main(i32 argc, i8** argv) {
         /* ctx->IASetIndexBuffer(ebo, DXGI_FORMAT_R16_UINT, 0); */
         ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        ctx->VSSetShaderResources(0, 1, &srv);
-
         ctx->RSSetState(rast_state);
 
-        /* ctx->Draw(array_size(vertices)/6, 0); */
-        /* ctx->Draw(3, 0); */
-        /* ctx->DrawIndexed(array_size(indices), 0, 0); */
-        ctx->DrawInstancedIndirect(indirect_buf, 0);
+        for(u32 i=0 ; i<4*4*4 ; i++) {
+            ctx->VSSetShaderResources(0, 1, &chunk_srvs[i]);
+            ctx->DrawInstancedIndirect(indirect_bufs[i], 0);
+        }
 
         ctx->VSSetShaderResources(0, 1, &null_srv);
 
 
+        // chunk wireframes
+        ctx->VSSetShader(chunk_VS, 0, 0);
+        ctx->PSSetShader(chunk_PS, 0, 0);
+        ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);
+        ctx->RSSetState(wireframe_rast_state);
+        ctx->Draw(2*5*5*3, 0);  // 2 vertex per line, 3 axis, 5*5 lines per axis
+
+
         swapchain->Present(0, 0);
+
+        if(first) {
+            first = false;
+
+            auto _time = std::chrono::high_resolution_clock::now();
+            f32 _dt = std::chrono::duration<f32, std::milli>(_time-last_time).count();
+            printf("first frame took %f ms\n", _dt);
+        }
     }
 
     // cleanup
