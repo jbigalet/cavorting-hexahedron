@@ -1,3 +1,7 @@
+static const float dim = (float)(CHUNK_SIZE);
+static const uint precomp_dim = (CHUNK_SIZE)+3;
+
+
 struct Vertex {
     float3 position;
     float3 color;
@@ -9,8 +13,6 @@ struct Triangle {
 
 AppendStructuredBuffer<Triangle> uav : register(u0);
 RWBuffer<float> precomp : register(u1);
-
-static const uint precomp_dim = 131;
 
 cbuffer ubo {
     float time;
@@ -342,7 +344,6 @@ static const uint mc_lut[256][3] = {
 };
 
 
-static const float dim = 128.f;
 static const float size = 10.f;
 static const float voxel_size = size/dim;
 

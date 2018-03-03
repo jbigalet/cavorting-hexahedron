@@ -1,5 +1,8 @@
+static const float dim = (float)(CHUNK_SIZE);
+static const uint precomp_dim = (CHUNK_SIZE)+3;
+
+
 RWBuffer<float> precomp : register(u0);
-static const uint precomp_dim = 131;
 
 cbuffer ubo {
     float time;
@@ -12,8 +15,6 @@ float metaball(float3 pos, float3 center) {
     return 1.f/dot(d, d);
 }
 
-
-static const float dim = 128.f;
 
 float val(float3 pos) {
     float3 p = pos/dim - float3(0.5, 0.5, 0.5);
@@ -31,9 +32,9 @@ float val(float3 pos) {
     return m - 50.f;
 }
 
-[numthreads(131, 1, 1)]
+[numthreads(precomp_dim, 1, 1)]
 void main(uint3 id: SV_DispatchThreadID) {
-	float3 pos = id;
-	pos -= float3(1, 1, 1);
-	precomp[id.x + precomp_dim*id.y + precomp_dim*precomp_dim*id.z] = val(pos);
+    float3 pos = id;
+    pos -= float3(1, 1, 1);
+    precomp[id.x + precomp_dim*id.y + precomp_dim*precomp_dim*id.z] = val(pos);
 }

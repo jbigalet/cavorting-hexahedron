@@ -90,6 +90,9 @@ LRESULT CALLBACK WindowProc(HWND hWnd, u32 message, WPARAM wParam, LPARAM lParam
 
 
 i32 main(i32 argc, i8** argv) {
+    const u32 chunk_size = 32;
+
+
     /* AttachConsole(ATTACH_PARENT_PROCESS); */
 /*     /1* AllocConsole(); *1/ */
     /* freopen("CONOUT$", "w", stdout); */
@@ -449,10 +452,15 @@ i32 main(i32 argc, i8** argv) {
 
     // compute shaders
 
+    const D3D10_SHADER_MACRO compute_macros[] = {
+        {"CHUNK_SIZE", std::to_string(chunk_size).c_str()},
+        {NULL, NULL}  // null terminated array
+    };
+
     ID3D11ComputeShader* CS;
     ID3D10Blob* _CS;
     ID3D10Blob* err;
-    res = D3DX11CompileFromFile("compute.hlsl", 0, 0, "main", "cs_5_0", 0, 0, 0, &_CS, &err, 0);
+    res = D3DX11CompileFromFile("compute.hlsl", compute_macros, 0, "main", "cs_5_0", 0, 0, 0, &_CS, &err, 0);
     if(FAILED(res)) {
         if(err != NULL)
             printf("cs compile error: %s\n", err->GetBufferPointer());
@@ -478,7 +486,7 @@ i32 main(i32 argc, i8** argv) {
 
     ID3D11ComputeShader* CS_precomp;
     ID3D10Blob* _CS_precomp;
-    res = D3DX11CompileFromFile("precomp.compute.hlsl", 0, 0, "main", "cs_5_0", 0, 0, 0, &_CS_precomp, &err, 0);
+    res = D3DX11CompileFromFile("precomp.compute.hlsl", compute_macros, 0, "main", "cs_5_0", 0, 0, 0, &_CS_precomp, &err, 0);
     if(FAILED(res)) {
         if(err != NULL)
             printf("cs compile error: %s\n", err->GetBufferPointer());
@@ -591,7 +599,7 @@ i32 main(i32 argc, i8** argv) {
     // TODO are 3d tex better/faster?
     D3D11_BUFFER_DESC precomp_desc;
     ZeroMemory(&precomp_desc, sizeof(D3D11_BUFFER_DESC));
-    u32 precomp_count = 131*131*131;  // 32 voxel + 1 (we store corners) + 2 (1 more corner in each direction for the normals)
+    u32 precomp_count = (chunk_size+3)*(chunk_size+3)*(chunk_size+3);  // 32 voxel + 1 (we store corners) + 2 (1 more corner in each direction for the normals)
     precomp_desc.ByteWidth = sizeof(f32)*precomp_count;
     precomp_desc.Usage = D3D11_USAGE_DEFAULT;
     precomp_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
@@ -720,7 +728,7 @@ i32 main(i32 argc, i8** argv) {
 
 
 
-        u32 dim = 128;
+        u32 dim = chunk_size;
         u32 zero = 0;
         ID3D11ShaderResourceView* null_srv = NULL;
         ID3D11UnorderedAccessView* null_uav = NULL;
@@ -730,7 +738,7 @@ i32 main(i32 argc, i8** argv) {
 
         ctx->CSSetShader(CS_precomp, NULL, 0);
         ctx->CSSetUnorderedAccessViews(0, 1, &precomp_view, &zero);
-        ctx->Dispatch(1, 131, 131);
+        ctx->Dispatch(1, chunk_size+3, chunk_size+3);
         ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, NULL);
         ctx->CSSetShader(NULL, NULL, 0);
 
