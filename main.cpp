@@ -89,18 +89,30 @@ LRESULT CALLBACK WindowProc(HWND hWnd, u32 message, WPARAM wParam, LPARAM lParam
 }
 
 
+void load_precomp(ID3D11Device* device, ID3D11ComputeShader** cs, const D3D10_SHADER_MACRO* compute_macros, bool can_fail=false) {
+    ID3D10Blob* _CS_precomp;
+    ID3D10Blob* err;
+    HRESULT res = D3DX11CompileFromFile("precomp.compute.hlsl", compute_macros, 0, "main", "cs_5_0", 0, 0, 0, &_CS_precomp, &err, 0);
+    if(FAILED(res)) {
+        if(err != NULL)
+            printf("cs compile error: %s\n", err->GetBufferPointer());
+
+        if(can_fail)
+            return;
+        else
+            unreachable();
+    }
+
+    device->CreateComputeShader(_CS_precomp->GetBufferPointer(), _CS_precomp->GetBufferSize(), NULL, cs);
+}
+
+
 i32 main(i32 argc, i8** argv) {
     const u32 chunk_size = 32;
-    const u32 max_chunk_count = 1000;
+    const vec3i chunk_dim { 8, 8, 8 };
+    /* const u32 max_chunk_count = chunk_dim.x * chunk_dim.y * chunk_dim.z; */
+    const u32 max_chunk_count = 8*8*8;
     const u32 max_precomp_buf_count = max_chunk_count;
-
-
-    /* AttachConsole(ATTACH_PARENT_PROCESS); */
-/*     /1* AllocConsole(); *1/ */
-    /* freopen("CONOUT$", "w", stdout); */
-    /* freopen("CONOUT$", "w", stderr); */
-
-    printf("hi!\n");
 
 
     // init dx11
@@ -437,14 +449,20 @@ i32 main(i32 argc, i8** argv) {
         ID3D10Blob* _PS;
         ID3D10Blob* err;
 
-        HRESULT vsres = D3DX11CompileFromFile("chunk_wireframe.hlsl", 0, 0, "VS", "vs_4_0", 0, 0, 0, &_VS, &err, 0);
+        cstring str_chunk_dim_x = strdup(std::to_string(chunk_dim.x).c_str());
+        const D3D10_SHADER_MACRO chunk_wireframe_macros[] = {
+            {"CHUNK_DIM_X", str_chunk_dim_x},
+            {NULL, NULL}  // null terminated array
+        };
+
+        HRESULT vsres = D3DX11CompileFromFile("chunk_wireframe.hlsl", chunk_wireframe_macros, 0, "VS", "vs_4_0", 0, 0, 0, &_VS, &err, 0);
         if(FAILED(vsres)) {
             if(err != NULL)
                 printf("vs compile error: %s\n", err->GetBufferPointer());
             unreachable();
         }
 
-        HRESULT hsres = D3DX11CompileFromFile("chunk_wireframe.hlsl", 0, 0, "PS", "ps_5_0", 0, 0, 0, &_PS, &err, 0);
+        HRESULT hsres = D3DX11CompileFromFile("chunk_wireframe.hlsl", chunk_wireframe_macros, 0, "PS", "ps_5_0", 0, 0, 0, &_PS, &err, 0);
         if(FAILED(hsres)) {
             if(err != NULL)
                 printf("ps compile error: %s\n", err->GetBufferPointer());
@@ -490,9 +508,10 @@ i32 main(i32 argc, i8** argv) {
 
     // compute shaders
 
-    printf("chunk size: %s\n", std::to_string(chunk_size).c_str());
+    cstring str_chunk_size = strdup(std::to_string(chunk_size).c_str());
+    printf("chunk size: %s\n", str_chunk_size);
     const D3D10_SHADER_MACRO compute_macros[] = {
-        {"CHUNK_SIZE", std::to_string(chunk_size).c_str()},
+        {"CHUNK_SIZE", str_chunk_size},
         {NULL, NULL}  // null terminated array
     };
 
@@ -523,17 +542,8 @@ i32 main(i32 argc, i8** argv) {
 
 
 
-    ID3D11ComputeShader* CS_precomp;
-    ID3D10Blob* _CS_precomp;
-    res = D3DX11CompileFromFile("precomp.compute.hlsl", compute_macros, 0, "main", "cs_5_0", 0, 0, 0, &_CS_precomp, &err, 0);
-    if(FAILED(res)) {
-        if(err != NULL)
-            printf("cs compile error: %s\n", err->GetBufferPointer());
-        unreachable();
-    }
-
-    device->CreateComputeShader(_CS_precomp->GetBufferPointer(), _CS_precomp->GetBufferSize(), NULL, &CS_precomp);
-
+    ID3D11ComputeShader* CS_precomp = NULL;
+    load_precomp(device, &CS_precomp, compute_macros);
 
 
 
@@ -542,7 +552,8 @@ i32 main(i32 argc, i8** argv) {
     D3D11_BUFFER_DESC uav_desc;
     ZeroMemory(&uav_desc, sizeof(D3D11_BUFFER_DESC));
     u32 ele_size = sizeof(vec3f)*2*3;  // pos + color ; *3 as we store a triangle
-    u32 ele_count = (chunk_size*chunk_size*chunk_size*5);  // TODO not sure if we can realisticly get the max triangle for each voxel
+    /* u32 ele_count = (chunk_size*chunk_size*chunk_size*5);  // TODO not sure if we can realisticly get the max triangle for each voxel */
+    u32 ele_count = (chunk_size*chunk_size*chunk_size);  // TODO not sure if we can realisticly get the max triangle for each voxel
     uav_desc.ByteWidth = ele_size*ele_count;
     uav_desc.Usage = D3D11_USAGE_DEFAULT;
     uav_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
@@ -672,6 +683,67 @@ i32 main(i32 argc, i8** argv) {
 
 
 
+    // noise textures
+    const u32 noise_res = 16;
+    D3D11_TEXTURE3D_DESC noise_tex_desc;
+    ZeroMemory(&noise_tex_desc, sizeof(D3D11_TEXTURE3D_DESC));
+    noise_tex_desc.Width = noise_res;
+    noise_tex_desc.Height = noise_res;
+    noise_tex_desc.Depth = noise_res;
+    noise_tex_desc.MipLevels = 1;
+    noise_tex_desc.Format = DXGI_FORMAT_R32_FLOAT;
+    noise_tex_desc.Usage = D3D11_USAGE_DYNAMIC;  // TODO immutable
+    noise_tex_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    noise_tex_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    noise_tex_desc.MiscFlags = 0;
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC noise_srv_desc;
+    ZeroMemory(&noise_srv_desc, sizeof(D3D11_SHADER_RESOURCE_VIEW_DESC));
+    noise_srv_desc.Format = noise_tex_desc.Format;
+    noise_srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE3D;
+    noise_srv_desc.Texture3D.MipLevels = 1;
+    noise_srv_desc.Texture3D.MostDetailedMip = 0;
+
+    const u32 noise_tex_count = 1;
+    ID3D11Texture3D* noise_tex[noise_tex_count];
+    ID3D11ShaderResourceView* noise_srv[noise_tex_count];
+    for(u32 i=0 ; i<noise_tex_count ; i++) {
+        res = device->CreateTexture3D(&noise_tex_desc, NULL, &noise_tex[i]);
+        assert(!FAILED(res));
+
+        D3D11_MAPPED_SUBRESOURCE m;
+        res = ctx->Map(noise_tex[i], 0, D3D11_MAP_WRITE_DISCARD, 0, &m);
+        assert(!FAILED(res));
+
+        f32* data = (f32*)malloc(m.DepthPitch*noise_res*sizeof(f32));
+        for(u32 x=0 ; x<noise_res ; x++)
+            for(u32 y=0 ; y<noise_res ; y++)
+                for(u32 z=0 ; z<noise_res ; z++) {
+                    f32 v = random_f01()*2-1;
+                    data[z*m.DepthPitch/4 + y*m.RowPitch/4 + x] = v;
+                }
+
+        memcpy(m.pData, (void*)data, m.DepthPitch*noise_res*sizeof(f32));
+
+        ctx->Unmap(noise_tex[i], 0);
+        free(data);
+
+        res = device->CreateShaderResourceView(noise_tex[i], &noise_srv_desc, &noise_srv[i]);
+        assert(!FAILED(res));
+    }
+
+    D3D11_SAMPLER_DESC sampler_desc;
+    sampler_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    sampler_desc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+    sampler_desc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+    sampler_desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+
+    ID3D11SamplerState* sampler;
+    res = device->CreateSamplerState(&sampler_desc, &sampler);
+    assert(!FAILED(res));
+
+
+
 
     mat4 proj = mat4::proj(0.1f, 200.f, 60.f*DEG_TO_RAD, (u32)viewport.Width, (u32)viewport.Height);
     /* mat4 proj = mat4::id(); */
@@ -691,6 +763,7 @@ i32 main(i32 argc, i8** argv) {
     u32 acu_frame_count = 0;
     f32 total_time = 0;
     bool first = true;
+    bool draw_grid = false;
     while(!should_close) {
         auto time = std::chrono::high_resolution_clock::now();
         f32 dt = std::chrono::duration<f32, std::milli>(time-last_time).count();
@@ -739,6 +812,15 @@ i32 main(i32 argc, i8** argv) {
                 should_close = true;
         }
 
+        if(keys['R'].pressed) {
+            printf("reloading precomp compute shader\n");
+            load_precomp(device, &CS_precomp, compute_macros, true);
+            first = true;
+        }
+
+
+        if(keys['G'].pressed)
+            draw_grid ^= 1;
 
 
         // cam controls
@@ -778,12 +860,12 @@ i32 main(i32 argc, i8** argv) {
         ID3D11ShaderResourceView* null_srv = NULL;
         ID3D11UnorderedAccessView* null_uav = NULL;
 
-        if(true || first) {
+        if(first) {
             u32 idx = 0;
 
-            for(i32 x=-2 ; x<2 ; x++)
-            for(i32 y=-2 ; y<2 ; y++)
-            for(i32 z=-2 ; z<2 ; z++) {
+            for(i32 x=-chunk_dim.x/2 ; x<chunk_dim.x/2 ; x++)
+            for(i32 y=-chunk_dim.y/2 ; y<chunk_dim.y/2 ; y++)
+            for(i32 z=-chunk_dim.z/2 ; z<chunk_dim.z/2 ; z++) {
 
                 f32 _ubo[] = {
                     total_time,
@@ -797,6 +879,8 @@ i32 main(i32 argc, i8** argv) {
                 // dispatch precomp
 
                 ctx->CSSetShader(CS_precomp, NULL, 0);
+                ctx->CSSetShaderResources(0, noise_tex_count, noise_srv);
+                ctx->CSSetSamplers(0, 1, &sampler);
                 ctx->CSSetUnorderedAccessViews(0, 1, &precomp_views[idx], &zero);
                 ctx->Dispatch(1, chunk_size+3, chunk_size+3);
                 ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, NULL);
@@ -854,7 +938,7 @@ i32 main(i32 argc, i8** argv) {
 
         ctx->RSSetState(rast_state);
 
-        for(u32 i=0 ; i<4*4*4 ; i++) {
+        for(u32 i=0 ; i<chunk_dim.x*chunk_dim.y*chunk_dim.z ; i++) {
             ctx->VSSetShaderResources(0, 1, &chunk_srvs[i]);
             ctx->DrawInstancedIndirect(indirect_bufs[i], 0);
         }
@@ -862,12 +946,14 @@ i32 main(i32 argc, i8** argv) {
         ctx->VSSetShaderResources(0, 1, &null_srv);
 
 
-        // chunk wireframes
-        ctx->VSSetShader(chunk_VS, 0, 0);
-        ctx->PSSetShader(chunk_PS, 0, 0);
-        ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);
-        ctx->RSSetState(wireframe_rast_state);
-        ctx->Draw(2*5*5*3, 0);  // 2 vertex per line, 3 axis, 5*5 lines per axis
+        if(draw_grid) {
+            // chunk wireframes
+            ctx->VSSetShader(chunk_VS, 0, 0);
+            ctx->PSSetShader(chunk_PS, 0, 0);
+            ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);
+            ctx->RSSetState(wireframe_rast_state);
+            ctx->Draw(2*(chunk_dim.x+1)*(chunk_dim.y+1)*3, 0);  // 2 vertex per line, 3 axis, 5*5 lines per axis - TODO only works if dim = N*N*N
+        }
 
 
         swapchain->Present(0, 0);

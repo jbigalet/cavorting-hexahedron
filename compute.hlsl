@@ -1,5 +1,3 @@
-#define CHUNK_SIZE 32
-
 static const float dim = (float)(CHUNK_SIZE);
 static const uint precomp_dim = (CHUNK_SIZE)+3;
 
@@ -30,22 +28,18 @@ cbuffer ubo {
 /*     uav.Append(v); */
 /* } */
 
-void append_triangle(float3 a, float3 b, float3 c, float3 color) {
+void append_triangle(float3 a, float3 b, float3 c) {
     // flat shading
 
-    /* append_vertex(a, color); */
-    /* append_vertex(b, color); */
-    /* append_vertex(c, color); */
     Triangle t;
     t.e[0].position = b + corner;
     t.e[1].position = a + corner;
     t.e[2].position = c + corner;
 
     float3 norm = normalize(cross(b-a, c-a));
-    color = norm;
-    t.e[0].color = color;
-    t.e[1].color = color;
-    t.e[2].color = color;
+    t.e[0].color = norm;
+    t.e[1].color = norm;
+    t.e[2].color = norm;
 
     uav.Append(t);
 }
@@ -67,23 +61,23 @@ void append_triangle_with_norms(float3 a, float3 b, float3 c, float3 na, float3 
 }
 
 void append_aabb(float3 corner, float size=1.f/dim, float3 color=float3(1, 0, 0)) {
-    append_triangle(corner + float3(0.f, size, size), corner + float3(0.f, 0.f, size), corner + float3(size, size, size), color); // Z+
-    append_triangle(corner + float3(size, size, size), corner + float3(0.f, 0.f, size), corner + float3(size, 0.f, size), color);
+    append_triangle(corner + float3(0.f, size, size), corner + float3(0.f, 0.f, size), corner + float3(size, size, size)); // Z+
+    append_triangle(corner + float3(size, size, size), corner + float3(0.f, 0.f, size), corner + float3(size, 0.f, size));
 
-    append_triangle(corner + float3(0.f, 0.f, 0.f), corner + float3(0.f, size, 0.f), corner + float3(size, size, 0.f), color); // Z-
-    append_triangle(corner + float3(0.f, 0.f, 0.f), corner + float3(size, size, 0.f), corner + float3(size, 0.f, 0.f), color);
+    append_triangle(corner + float3(0.f, 0.f, 0.f), corner + float3(0.f, size, 0.f), corner + float3(size, size, 0.f)); // Z-
+    append_triangle(corner + float3(0.f, 0.f, 0.f), corner + float3(size, size, 0.f), corner + float3(size, 0.f, 0.f));
 
-    append_triangle(corner + float3(size, 0.f, size), corner + float3(size, 0.f, 0.f), corner + float3(size, size, size), color); // X+
-    append_triangle(corner + float3(size, size, size), corner + float3(size, 0.f, 0.f), corner + float3(size, size, 0.f), color);
+    append_triangle(corner + float3(size, 0.f, size), corner + float3(size, 0.f, 0.f), corner + float3(size, size, size)); // X+
+    append_triangle(corner + float3(size, size, size), corner + float3(size, 0.f, 0.f), corner + float3(size, size, 0.f));
 
-    append_triangle(corner + float3(0.f, 0.f, 0.f), corner + float3(0.f, 0.f, size), corner + float3(0.f, size, size), color); // X-
-    append_triangle(corner + float3(0.f, 0.f, 0.f), corner + float3(0.f, size, size), corner + float3(0.f, size, 0.f), color);
+    append_triangle(corner + float3(0.f, 0.f, 0.f), corner + float3(0.f, 0.f, size), corner + float3(0.f, size, size)); // X-
+    append_triangle(corner + float3(0.f, 0.f, 0.f), corner + float3(0.f, size, size), corner + float3(0.f, size, 0.f));
 
-    append_triangle(corner + float3(0.f, size, 0.f), corner + float3(0.f, size, size), corner + float3(size, size, size), color); // Y+
-    append_triangle(corner + float3(0.f, size, 0.f), corner + float3(size, size, size), corner + float3(size, size, 0.f), color);
+    append_triangle(corner + float3(0.f, size, 0.f), corner + float3(0.f, size, size), corner + float3(size, size, size)); // Y+
+    append_triangle(corner + float3(0.f, size, 0.f), corner + float3(size, size, size), corner + float3(size, size, 0.f));
 
-    append_triangle(corner + float3(0.f, 0.f, size), corner + float3(0.f, 0.f, 0.f), corner + float3(size, 0.f, size), color); // Y-
-    append_triangle(corner + float3(size, 0.f, size), corner + float3(0.f, 0.f, 0.f), corner + float3(size, 0.f, 0.f), color);
+    append_triangle(corner + float3(0.f, 0.f, size), corner + float3(0.f, 0.f, 0.f), corner + float3(size, 0.f, size)); // Y-
+    append_triangle(corner + float3(size, 0.f, size), corner + float3(0.f, 0.f, 0.f), corner + float3(size, 0.f, 0.f));
 }
 
 
@@ -439,6 +433,7 @@ void main(uint3 id: SV_DispatchThreadID) {
         idx_in_byte++;
         if(tri_idx == 3) {
             append_triangle_with_norms(tri[0]/dim, tri[1]/dim, tri[2]/dim, norms[0], norms[1], norms[2]);
+            /* append_triangle(tri[0]/dim, tri[1]/dim, tri[2]/dim); */
             tri_idx = 0;
             limit--;
             if(limit == 0)

@@ -1,10 +1,10 @@
-#define CHUNK_SIZE 32
-
 static const float dim = (float)(CHUNK_SIZE);
 static const uint precomp_dim = (CHUNK_SIZE)+3;
 
 
 RWBuffer<float> precomp : register(u0);
+SamplerState ssampler : register(s0);
+Texture3D noise_tex_1 : register(t0);
 
 cbuffer ubo {
     float time;
@@ -13,6 +13,7 @@ cbuffer ubo {
 
 
 
+#if 0
 float metaball(float3 pos, float3 center) {
     float3 d = pos-center;
     return 1.f/dot(d, d);
@@ -36,6 +37,21 @@ float val(float3 p) {
     }
 
     return m - 50.f;
+}
+#endif
+
+float val(float3 p) {
+    float v = -p.y;
+
+    p.x += noise_tex_1.SampleLevel(ssampler, p/200, 0).x;
+    p.y += noise_tex_1.SampleLevel(ssampler, -p/117, 0).x;
+    p.z += noise_tex_1.SampleLevel(ssampler, p/100-0.3, 0).x;
+
+    v += noise_tex_1.SampleLevel(ssampler, p*10, 0).x/50;
+    v += noise_tex_1.SampleLevel(ssampler, p/3, 0).x/12;
+    v += noise_tex_1.SampleLevel(ssampler, p/11, 0).x;
+    v += noise_tex_1.SampleLevel(ssampler, p/20, 0).x*2;
+    return v;
 }
 
 [numthreads(precomp_dim, 1, 1)]

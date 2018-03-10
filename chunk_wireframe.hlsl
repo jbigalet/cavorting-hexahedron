@@ -18,7 +18,7 @@ float3 update_comp(float3 v, uint axis, float val) {
 }
 
 VOut VS(uint InstanceId : SV_VertexID) {
-    const uint side_size = 4;
+    const uint side_size = CHUNK_DIM_X;
     const uint line_per_side = side_size+1;
 
     uint id = InstanceId;
